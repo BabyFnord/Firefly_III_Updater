@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# Firefly III Updater v1.0.1
+# 23.07.2023 Patrick Raddatz
+# This shell script will update your Firefly III installation to the latest version.
+
+echo "This is the Firefly III Updater v1.0.1 …"
+
+# Fetch the latest release from the GitHub API
+version=$(curl -sI https://github.com/firefly-iii/firefly-iii/releases/latest | awk -F '/' '/^location/ {print  substr($NF, 1, length($NF)-1)}')
+latest_version=${version#v}
+
+# Print current version and the latest version available on GitHub
+echo "Latest Firefly III version is:      $latest_version"
+file="/var/www/virtual/$USER/firefly_iii/changelog.md"
+current_version=$(grep -m 1 -oP '## \K.*?(?= -)' "$file")
+echo "The currently installed version is: $current_version"
+read -p "Would you like to update? (y/n): " choice
+
+if [[ $choice == "y" || $choice == "Y" ]]; then
+    # Code for actions to be taken when the user chooses to proceed
+    echo "Proceeding …"
+elif [[ $choice == "n" || $choice == "N" ]]; then
+    # Code for actions to be taken when the user chooses to quit
+    echo "Quitting …"
+    exit
+else
+    echo "Invalid choice. Please choose 'y' to proceed or 'n' to quit."
+fi
+
+# Remove the backup of any prior version we may have created before
+cd /var/www/virtual/"$USER"/ || exit
+rm -rf firefly-iii-old
+
+#
+composer create-project grumpydictator/firefly-iii --no-dev --prefer-dist firefly-iii-updated "${latest_version}"
+
+# Copy environment and htaccess files over to the new Firefly version
+cp firefly_iii/.env firefly-iii-updated/.env
+cp firefly_iii/public/.htaccess firefly-iii-updated/public/.htaccess
+
+# Copy storage files over to the new Firefly version
+cp firefly_iii/storage/upload/* firefly-iii-updated/storage/upload/ || true
+cp firefly_iii/storage/export/* firefly-iii-updated/storage/export/ || true
+
+# Clear the cache
+cd firefly-iii-updated || exit
+rm -rf bootstrap/cache/*
+
+# Do PHP stuff
+php artisan cache:clear
+php artisan migrate --seed
+php artisan firefly-iii:upgrade-database
+php artisan passport:install
+php artisan cache:clear
+
+# Rename old and new base folders accordingly
+cd ..
+mv firefly_iii firefly-iii-old
+mv firefly-iii-updated firefly_iii
+
+exit
